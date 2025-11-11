@@ -1,0 +1,268 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Escape The Maze</title>
+  <style>
+    html,body{height:100%;margin:0;background:#111;color:#eee;font-family:system-ui,Segoe UI,Roboto,Arial}
+    .wrap{display:flex;flex-direction:column;align-items:center;padding:18px}
+    canvas{background:#111;border:6px solid #222;box-shadow:0 6px 30px rgba(0,0,0,0.8)}
+    h1{margin:8px 0 6px;font-size:20px}
+    .controls{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center}
+    button{background:#222;border:1px solid #333;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .info{margin-top:8px;font-size:13px;color:#bbb}
+    .footer{margin-top:12px;color:#888;font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Escape The Maze — (Use arrow keys or WASD)</h1>
+    <canvas id="game" width="640" height="480"></canvas>
+    <div class="controls">
+      <button id="resetBtn">New Maze</button>
+      <button id="solveBtn">Show Path</button>
+      <button id="resizeBtn">Increase Size</button>
+      <div class="info">Goal: Reach the green square. Walls are dark gray. You are the blue square.</div>
+    </div>
+    <div class="footer">Press R to regenerate maze. Press H to toggle hint. Player moves: arrow keys / WASD.</div>
+  </div>
+
+<script>
+/*
+  Escape The Maze — single-file game
+  - Maze generated with randomized DFS (recursive backtracking)
+  - Player moves on grid, collides with walls
+  - Goal tile wins the level
+  - Show path uses simple BFS to find a path and draw it
+*/
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+let cols = 20, rows = 15; // grid size (modifiable)
+let cellSize = Math.floor(Math.min(canvas.width/cols, canvas.height/rows));
+let maze, player, goal;
+let showHint=false;
+let path = null;
+
+function Cell(x,y){
+  this.x = x;
+  this.y = y;
+  this.walls = [true,true,true,true]; // top, right, bottom, left
+  this.visited = false;
+}
+function index(x,y){ return x + y*cols; }
+
+function generateMaze(){
+  cellSize = Math.floor(Math.min(canvas.width/cols, canvas.height/rows));
+  maze = [];
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      maze.push(new Cell(x,y));
+    }
+  }
+  // recursive backtracker
+  let stack = [];
+  let current = maze[0];
+  current.visited = true;
+  let total = cols*rows;
+  let visitedCount = 1;
+  while(visitedCount < total){
+    let neighbors = [];
+    let x=current.x, y=current.y;
+    const directions = [
+      {nx:x, ny:y-1, dir:0, opp:2},
+      {nx:x+1, ny:y, dir:1, opp:3},
+      {nx:x, ny:y+1, dir:2, opp:0},
+      {nx:x-1, ny:y, dir:3, opp:1},
+    ];
+    for(let d of directions){
+      if(d.nx>=0 && d.nx<cols && d.ny>=0 && d.ny<rows){
+        let neighbor = maze[index(d.nx,d.ny)];
+        if(!neighbor.visited) neighbors.push({cell:neighbor,dir:d.dir,opp:d.opp});
+      }
+    }
+    if(neighbors.length>0){
+      let pick = neighbors[Math.floor(Math.random()*neighbors.length)];
+      current.walls[pick.dir]=false;
+      pick.cell.walls[pick.opp]=false;
+      stack.push(current);
+      current = pick.cell;
+      current.visited = true;
+      visitedCount++;
+    } else {
+      current = stack.pop();
+    }
+  }
+  // place player at random empty cell near top-left and goal at bottom-right
+  player = {x:0,y:0};
+  goal = {x:cols-1,y:rows-1};
+  path = null;
+  showHint = false;
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();
+  // center maze
+  const totalW = cols*cellSize;
+  const totalH = rows*cellSize;
+  const offsetX = Math.floor((canvas.width - totalW)/2);
+  const offsetY = Math.floor((canvas.height - totalH)/2);
+  ctx.translate(offsetX, offsetY);
+
+  // draw cells
+  ctx.lineWidth = Math.max(1, Math.floor(cellSize*0.08));
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      let c = maze[index(x,y)];
+      let px = x*cellSize, py = y*cellSize;
+      // floor
+      ctx.fillStyle = '#0b0b0b';
+      ctx.fillRect(px,py,cellSize,cellSize);
+      ctx.strokeStyle = '#262626';
+      // walls (top,right,bottom,left)
+      ctx.beginPath();
+      if(c.walls[0]){ ctx.moveTo(px,py); ctx.lineTo(px+cellSize,py); }
+      if(c.walls[1]){ ctx.moveTo(px+cellSize,py); ctx.lineTo(px+cellSize,py+cellSize); }
+      if(c.walls[2]){ ctx.moveTo(px+cellSize,py+cellSize); ctx.lineTo(px,py+cellSize); }
+      if(c.walls[3]){ ctx.moveTo(px,py+cellSize); ctx.lineTo(px,py); }
+      ctx.stroke();
+    }
+  }
+
+  // draw path hint if requested
+  if(showHint && path){
+    ctx.fillStyle = 'rgba(80,200,120,0.25)';
+    for(let p of path){
+      ctx.fillRect(p.x*cellSize, p.y*cellSize, cellSize, cellSize);
+    }
+  }
+
+  // draw goal
+  ctx.fillStyle = '#3adb76'; // green
+  ctx.fillRect(goal.x*cellSize + cellSize*0.16, goal.y*cellSize + cellSize*0.16,
+               cellSize*0.68, cellSize*0.68);
+
+  // draw player
+  ctx.fillStyle = '#3b82f6'; // blue
+  ctx.fillRect(player.x*cellSize + cellSize*0.18, player.y*cellSize + cellSize*0.18,
+               cellSize*0.64, cellSize*0.64);
+
+  ctx.restore();
+}
+
+function canMove(px,py,dx,dy){
+  // check walls between current and target
+  if(px<0||px>=cols||py<0||py>=rows) return false;
+  let c = maze[index(px,py)];
+  if(dx===-1 && c.walls[3]) return false;
+  if(dx===1 && c.walls[1]) return false;
+  if(dy===-1 && c.walls[0]) return false;
+  if(dy===1 && c.walls[2]) return false;
+  // also ensure target cell exists (should)
+  return true;
+}
+
+function movePlayer(dx,dy){
+  if(canMove(player.x,player.y,dx,dy)){
+    player.x += dx; player.y += dy;
+    // check win
+    if(player.x===goal.x && player.y===goal.y){
+      setTimeout(()=> { alert('You escaped the maze! 🎉'); generateMaze(); draw(); }, 50);
+    } else {
+      draw();
+    }
+  }
+}
+
+window.addEventListener('keydown', (e)=>{
+  const key = e.key.toLowerCase();
+  if(['arrowup','w'].includes(key) || key==='w'){
+    movePlayer(0,-1);
+    e.preventDefault();
+  } else if(['arrowdown','s'].includes(key) || key==='s'){
+    movePlayer(0,1);
+    e.preventDefault();
+  } else if(['arrowleft','a'].includes(key) || key==='a'){
+    movePlayer(-1,0);
+    e.preventDefault();
+  } else if(['arrowright','d'].includes(key) || key==='d'){
+    movePlayer(1,0);
+    e.preventDefault();
+  } else if(key==='r'){
+    generateMaze(); draw();
+  } else if(key==='h'){
+    showHint = !showHint;
+    if(showHint) computePath();
+    draw();
+  }
+});
+
+// BFS to find shortest path for hint or Solve
+function computePath(){
+  const q = [];
+  const visited = new Array(cols*rows).fill(false);
+  const parent = new Array(cols*rows).fill(-1);
+  q.push({x:player.x,y:player.y});
+  visited[index(player.x,player.y)] = true;
+  let found=false;
+  while(q.length>0){
+    const cur = q.shift();
+    if(cur.x===goal.x && cur.y===goal.y){ found=true; break; }
+    const moves = [{dx:0,dy:-1},{dx:1,dy:0},{dx:0,dy:1},{dx:-1,dy:0}];
+    for(let m of moves){
+      if(canMove(cur.x,cur.y,m.dx,m.dy)){
+        let nx=cur.x+m.dx, ny=cur.y+m.dy;
+        if(!visited[index(nx,ny)]){
+          visited[index(nx,ny)]=true;
+          parent[index(nx,ny)] = index(cur.x,cur.y);
+          q.push({x:nx,y:ny});
+        }
+      }
+    }
+  }
+  if(!found){ path=null; return; }
+  // reconstruct
+  let p = [];
+  let curIdx = index(goal.x,goal.y);
+  while(curIdx !== index(player.x,player.y)){
+    let cx = curIdx % cols, cy = Math.floor(curIdx/cols);
+    p.push({x:cx,y:cy});
+    curIdx = parent[curIdx];
+    if(curIdx===-1) break;
+  }
+  p.push({x:player.x,y:player.y});
+  p.reverse();
+  path = p;
+}
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  generateMaze(); draw();
+});
+document.getElementById('solveBtn').addEventListener('click', ()=>{
+  computePath();
+  showHint = true;
+  draw();
+});
+document.getElementById('resizeBtn').addEventListener('click', ()=>{
+  // cycle sizes
+  if(cols===20){ cols=30; rows=22; }
+  else if(cols===30){ cols=12; rows=9; }
+  else { cols=20; rows=15; }
+  generateMaze(); draw();
+});
+
+// initial
+generateMaze();
+draw();
+
+// make canvas responsive-ish
+window.addEventListener('resize', ()=>{
+  // keep canvas same pixel size but center; optional: not scaling for simplicity
+  draw();
+});
+</script>
+</body>
+</html>
